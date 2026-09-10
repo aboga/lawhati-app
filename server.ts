@@ -157,7 +157,9 @@ app.get('/api/boards', async (req, res) => {
   const { authUser } = await currentUser(req);
   const { filter, search, category } = req.query;
   let query = admin!.from('boards').select('data');
-  if (filter === 'my' && authUser) query = query.eq('owner_id', authUser.id);
+  // Dashboard data is user-scoped by default. Never leak another user's private workspace.
+  if (authUser) query = query.eq('owner_id', authUser.id);
+  else return res.json({ boards: [] });
   if (filter === 'trash') query = query.filter('data->>isTrash', 'eq', 'true');
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
@@ -241,6 +243,9 @@ app.get('/api/boards/:id/posts', async (req, res) => { if (!requireConfig(res)) 
 
 app.post('/api/boards/:id/posts', async (req, res) => {
   if (!requireConfig(res)) return; const auth = await requireLoggedIn(req, res); if (!auth) return;
+  const { data: boardRow } = await admin!.from('boards').select('owner_id').eq('id', req.params.id).maybeSingle();
+  if (!boardRow) return res.status(404).json({ error: 'اللوحة غير موجودة' });
+  if ((boardRow as any).owner_id !== auth.authUser.id) return res.status(403).json({ error: 'ليس لديك صلاحية الإضافة إلى هذه اللوحة.' });
   const id = 'post-' + crypto.randomUUID(); const newPost = { id, boardId: req.params.id, ...req.body, authorId: auth.authUser.id, authorName: auth.user.name, authorAvatar: auth.user.avatar, reactions: req.body.reactions || { '❤️': 0, '👏': 0, '👍': 0, '💡': 0, '😂': 0 }, userReactions: {}, comments: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const { error } = await admin!.from('posts').insert({ id, board_id: req.params.id, data: newPost }); if (error) return res.status(500).json({ error: error.message }); res.status(201).json({ post: newPost });
 });

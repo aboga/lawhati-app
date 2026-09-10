@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { Logo } from './Logo';
 
 export const AuthModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
-  const { user, setUser, direction, language, setCurrentView } = useApp();
+  const { user, setUser, direction, language, setCurrentView, refreshBoards } = useApp();
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login');
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
 
@@ -31,7 +31,10 @@ export const AuthModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ 
       const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'تعذر تنفيذ العملية');
-      if (data.user) setUser(prev => ({ ...prev, ...data.user, phone: phone || prev.phone, twoFactorEnabled: twoFactor }));
+      if (data.user) {
+        setUser(prev => ({ ...prev, ...data.user, phone: phone || prev.phone, twoFactorEnabled: twoFactor }));
+        await refreshBoards();
+      }
       setSuccessMessage(data.requiresEmailConfirmation ? 'تم إنشاء الحساب. تحقق من بريدك الإلكتروني أولاً.' : (tab === 'login' ? 'تم تسجيل الدخول بنجاح!' : 'تم إنشاء الحساب بنجاح!'));
       setTimeout(() => { setSuccessMessage(''); onClose(); if (!data.requiresEmailConfirmation) setCurrentView('dashboard'); }, 900);
     } catch (err: any) {

@@ -27,7 +27,8 @@ export const Navbar: React.FC = () => {
     notifications,
     unreadNotificationsCount,
     markNotificationsAsRead,
-    setActiveBoardId
+    setActiveBoardId,
+    logout
   } = useApp();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -309,7 +310,7 @@ export const Navbar: React.FC = () => {
                   <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
 
                   <button
-                    onClick={() => { setIsAuthModalOpen(true); setIsUserMenuOpen(false); }}
+                    onClick={async () => { setIsUserMenuOpen(false); await logout(); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition text-start"
                   >
                     <LogOut className="w-4 h-4" />

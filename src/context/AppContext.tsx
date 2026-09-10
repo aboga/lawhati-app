@@ -18,6 +18,8 @@ interface AppContextType {
   user: User;
   setUser: React.Dispatch<React.SetStateAction<User>>;
   switchRole: (role: 'teacher' | 'student' | 'admin' | 'user') => void;
+  logout: () => Promise<void>;
+  refreshBoards: () => Promise<void>;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   
@@ -105,9 +107,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Boards and Posts
-  const [boards, setBoards] = useState<Board[]>(INITIAL_BOARDS);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [activeBoardId, setActiveBoardIdState] = useState<string | null>(null);
-  const [postsStore, setPostsStore] = useState<Record<string, Post[]>>(INITIAL_POSTS);
+  const [postsStore, setPostsStore] = useState<Record<string, Post[]>>({});
 
   // Modals
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState(false);
@@ -151,26 +153,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [direction, language, isDarkMode]);
 
-  // Restore authenticated session from the production backend.
-  useEffect(() => {
-    fetch('/api/auth/me')
-      .then(res => res.json())
-      .then(data => { if (data.user) setUser(prev => ({ ...prev, ...data.user })); })
-      .catch(() => {});
-  }, []);
+  const refreshBoards = async () => {
+    try {
+      const res = await fetch('/api/boards?filter=my', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'تعذر تحميل اللوحات');
+      setBoards(Array.isArray(data.boards) ? data.boards : []);
+      setPostsStore({});
+      setActiveBoardIdState(null);
+    } catch {
+      setBoards([]);
+      setPostsStore({});
+      setActiveBoardIdState(null);
+    }
+  };
 
-  // Load boards from the production backend on start
+  // Restore the authenticated session, then load only that user's boards.
   useEffect(() => {
-    fetch('/api/boards')
-      .then(res => res.json())
-      .then(data => {
-        if (data.boards && data.boards.length > 0) {
-          setBoards(data.boards);
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.user) {
+          setUser(prev => ({ ...prev, ...data.user }));
+          await refreshBoards();
+        } else {
+          setBoards([]);
+          setPostsStore({});
         }
-      })
-      .catch(() => {
-        // Fallback already in memory
-      });
+      } catch {
+        setBoards([]);
+        setPostsStore({});
+      }
+    })();
   }, []);
 
   // Periodic typing simulation on active board for real-time collaboration feel
@@ -212,70 +227,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }).catch(() => {});
   };
 
-  const createBoard = async (boardData: Partial<Board>, initialPosts: any[] = []): Promise<Board> => {
+  const logout = async () => {
     try {
-      const res = await fetch('/api/boards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...boardData, initialPosts }),
-      });
-      const data = await res.json();
-      if (data.board) {
-        setBoards(prev => [data.board, ...prev]);
-        setPostsStore(prev => ({ ...prev, [data.board.id]: data.posts || initialPosts }));
-        return data.board;
-      }
-    } catch (e) {
-      console.error('Failed to create board on server:', e);
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } finally {
+      setBoards([]);
+      setPostsStore({});
+      setActiveBoardIdState(null);
+      setUser(INITIAL_USER);
+      setSearchQuery('');
+      setActiveFilter('all');
+      setCurrentView('landing');
+      setIsAuthModalOpen(true);
+    }
+  };
+
+  const createBoard = async (boardData: Partial<Board>, initialPosts: any[] = []): Promise<Board> => {
+    const res = await fetch('/api/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ ...boardData, initialPosts }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.board) {
+      throw new Error(data.error || 'تعذر إنشاء اللوحة');
     }
 
-    // Local optimistic fallback
-    const newBoard: Board = {
-      id: 'board-' + Date.now(),
-      title: boardData.title || 'لوحة جديدة',
-      description: boardData.description || '',
-      type: boardData.type || 'wall',
-      background: boardData.background || {
-        type: 'gradient',
-        value: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-        name: 'سماء زرقاء',
-      },
-      font: boardData.font || 'cairo',
-      cardShape: boardData.cardShape || 'rounded',
-      postOrdering: boardData.postOrdering || 'newest_first',
-      privacy: boardData.privacy || 'public',
-      ownerId: user.id,
-      ownerName: user.name,
-      ownerAvatar: user.avatar,
-      isFavorite: false,
-      isArchived: false,
-      isTrash: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      viewsCount: 1,
-      sharesCount: 0,
-      tags: boardData.tags || ['لوحة تفاعلية'],
-      category: boardData.category || 'التعليم',
-      members: [
-        {
-          userId: user.id,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar,
-          role: 'owner',
-          status: 'online',
-        },
-      ],
-      columns: boardData.columns || (boardData.type === 'columns' ? [
-        { id: 'col_1', title: 'الأفكار والملاحظات', color: '#fef08a' },
-        { id: 'col_2', title: 'قيد المناقشة', color: '#bae6fd' },
-        { id: 'col_3', title: 'المشاريع والأنشطة', color: '#bbf7d0' },
-      ] : undefined),
-    };
-
-    setBoards(prev => [newBoard, ...prev]);
-    setPostsStore(prev => ({ ...prev, [newBoard.id]: initialPosts }));
-    return newBoard;
+    setBoards(prev => [data.board, ...prev.filter(b => b.id !== data.board.id)]);
+    setPostsStore(prev => ({ ...prev, [data.board.id]: data.posts || [] }));
+    setActiveBoardIdState(data.board.id);
+    setCurrentView('board');
+    return data.board;
   };
 
   const updateBoard = async (id: string, updates: Partial<Board>) => {
@@ -352,61 +335,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Posts operations
   const createPost = async (postData: Partial<Post>): Promise<Post> => {
-    if (!activeBoardId) throw new Error('No active board');
+    if (!activeBoardId) throw new Error('لم يتم تحديد لوحة نشطة');
     const boardId = activeBoardId;
+    let payload: Partial<Post> = { ...postData };
 
-    try {
-      const res = await fetch(`/api/boards/${boardId}/posts`, {
+    // Persist browser-selected media in Supabase Storage before saving the post.
+    if (payload.mediaUrl?.startsWith('data:')) {
+      const match = payload.mediaUrl.match(/^data:([^;]+);base64,/);
+      const uploadRes = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(postData),
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          fileName: payload.fileName || `attachment-${Date.now()}`,
+          fileType: match?.[1] || 'application/octet-stream',
+          fileData: payload.mediaUrl,
+        }),
       });
-      const data = await res.json();
-      if (data.post) {
-        setPostsStore(prev => ({
-          ...prev,
-          [boardId]: [data.post, ...(prev[boardId] || [])],
-        }));
-        return data.post;
-      }
-    } catch (e) {}
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok || !uploadData.url) throw new Error(uploadData.error || 'تعذر رفع الملف');
+      payload = { ...payload, mediaUrl: uploadData.url, fileName: uploadData.fileName || payload.fileName };
+    }
 
-    const newPost: Post = {
-      id: 'post_' + Date.now(),
-      boardId,
-      columnId: postData.columnId || selectedColumnForPost,
-      title: postData.title || '',
-      content: postData.content || '',
-      type: postData.type || 'text',
-      mediaUrl: postData.mediaUrl,
-      fileName: postData.fileName,
-      fileSize: postData.fileSize,
-      authorId: user.id,
-      authorName: user.name,
-      authorAvatar: user.avatar,
-      color: postData.color || '#ffffff',
-      emoji: postData.emoji,
-      isPinned: postData.isPinned || false,
-      isImportant: postData.isImportant || false,
-      allowComments: postData.allowComments ?? true,
-      allowReactions: postData.allowReactions ?? true,
-      reactions: { '❤️': 0, '👏': 0, '👍': 0, '💡': 0, '😂': 0 },
-      userReactions: {},
-      comments: [],
-      pollData: postData.pollData,
-      tasks: postData.tasks,
-      locationData: postData.locationData,
-      drawingData: postData.drawingData,
-      order: (postsStore[boardId]?.length || 0) + 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const res = await fetch(`/api/boards/${boardId}/posts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.post) throw new Error(data.error || 'تعذر إضافة المنشور');
 
     setPostsStore(prev => ({
       ...prev,
-      [boardId]: [newPost, ...(prev[boardId] || [])],
+      [boardId]: [data.post, ...(prev[boardId] || [])],
     }));
-    return newPost;
+    return data.post;
   };
 
   const updatePost = async (postId: string, updates: Partial<Post>) => {
@@ -656,6 +620,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         user,
         setUser,
         switchRole,
+        logout,
+        refreshBoards,
         isAuthModalOpen,
         setIsAuthModalOpen,
         boards,
