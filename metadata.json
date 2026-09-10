@@ -1,0 +1,11 @@
+{
+  "name": "لوحتي | Lawhati",
+  "description": "منصة رقمية تفاعلية لإنشاء اللوحات الرقمية التفاعلية ومشاركتها والتعاون الفوري للمدارس والتعليم وفرق العمل.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
